@@ -1,110 +1,189 @@
 import pygame
+import math
 
-# Initialize Pygame
-pygame.init()
+# === НАСТРОЙКИ ===
+WIDTH, HEIGHT = 1000, 600
+ROWS, COLS = 30, 40
+PIXEL_SIZE = WIDTH // COLS
+DRAW_GRID_LINES = False
+TOOLBAR_HEIGHT = HEIGHT - ROWS * PIXEL_SIZE
+FPS = 60
 
-# Set up screen and clock
-screen = pygame.display.set_mode((640, 480))
-clock = pygame.time.Clock()
-
-# Colors
+# Цвета
 WHITE = (255, 255, 255)
 BLACK = (0, 0, 0)
-RED = (255, 0, 0)
+RED   = (255, 0, 0)
 GREEN = (0, 255, 0)
-BLUE = (0, 0, 255)
+BLUE  = (0, 0, 255)
+BG_COLOR = WHITE
 
-# Default settings
-radius = 15
-drawing_mode = 'pencil'  # Modes: 'pencil', 'rectangle', 'circle', 'eraser'
-current_color = BLUE
-start_pos = None
-rect_start = None
+# === Шрифт ===
+def get_font(size):
+    return pygame.font.SysFont("comicsans", size)
 
+# === Кнопка ===
+class Button:
+    def __init__(self, x, y, width, height, color, text=None, text_color=BLACK):
+        self.x = x
+        self.y = y
+        self.width = width
+        self.height = height
+        self.color = color
+        self.text = text
+        self.text_color = text_color
+
+    def draw(self, win):
+        pygame.draw.rect(win, self.color, (self.x, self.y, self.width, self.height))
+        pygame.draw.rect(win, BLACK, (self.x, self.y, self.width, self.height), 2)
+        if self.text:
+            button_font = get_font(18)
+            text_surface = button_font.render(self.text, 1, self.text_color)
+            win.blit(
+                text_surface,
+                (
+                    self.x + self.width / 2 - text_surface.get_width() / 2,
+                    self.y + self.height / 2 - text_surface.get_height() / 2,
+                ),
+            )
+
+    def clicked(self, pos):
+        x, y = pos
+        return self.x <= x <= self.x + self.width and self.y <= y <= self.y + self.height
+
+# === Сетка ===
+def init_grid(rows, cols, color):
+    return [[color for _ in range(cols)] for _ in range(rows)]
+
+def draw_grid(win, grid):
+    for i, row in enumerate(grid):
+        for j, pixel in enumerate(row):
+            pygame.draw.rect(win, pixel, (j * PIXEL_SIZE, i * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE))
+
+# === Основной отрисовщик ===
+def draw(win, grid, buttons):
+    win.fill(BG_COLOR)
+    draw_grid(win, grid)
+    for button in buttons:
+        button.draw(win)
+    pygame.display.update()
+
+def get_row_col_from_pos(pos):
+    x, y = pos
+    row = y // PIXEL_SIZE
+    col = x // PIXEL_SIZE
+    if row >= ROWS:
+        raise IndexError
+    return row, col
+
+# === Фигуры ===
+def draw_square(grid, row, col, color):
+    for i in range(3):
+        for j in range(3):
+            if row + i < ROWS and col + j < COLS:
+                grid[row + i][col + j] = color
+
+def draw_right_triangle(grid, row, col, color):
+    for i in range(3):
+        for j in range(i + 1):
+            if row + i < ROWS and col + j < COLS:
+                grid[row + i][col + j] = color
+
+def draw_equilateral_triangle(grid, row, col, color):
+    # Пирамидка шириной 5
+    offsets = [-2, -1, 0, 1, 2]
+    for i in range(3):
+        for j in range(-i, i + 1):
+            r, c = row + i, col + j
+            if 0 <= r < ROWS and 0 <= c < COLS:
+                grid[r][c] = color
+
+def draw_rhombus(grid, row, col, color):
+    # Алмазная форма из 5 точек
+    offsets = [(0, 0), (-1, 0), (1, 0), (0, -1), (0, 1)]
+    for dr, dc in offsets:
+        r, c = row + dr, col + dc
+        if 0 <= r < ROWS and 0 <= c < COLS:
+            grid[r][c] = color
+
+# === Основная функция ===
 def main():
-    global radius, drawing_mode, current_color, rect_start
+    pygame.init()
+    win = pygame.display.set_mode((WIDTH, HEIGHT))
+    pygame.display.set_caption("Drawing Program - Lab 8 Extended")
+    clock = pygame.time.Clock()
 
-    points = []  # Stores points for pencil tool (line drawing)
-    running = True
+    grid = init_grid(ROWS, COLS, BG_COLOR)
+    drawing_color = BLACK
+    current_shape = None
 
-    while running:
-        screen.fill(WHITE)
+    # Кнопки выбора цвета
+    button_y = HEIGHT - TOOLBAR_HEIGHT / 2 - 25
+    buttons = [
+        Button(10, button_y, 50, 50, BLACK),
+        Button(70, button_y, 50, 50, RED),
+        Button(130, button_y, 50, 50, GREEN),
+        Button(190, button_y, 50, 50, BLUE),
+        Button(250, button_y, 60, 50, WHITE, "Erase", BLACK),
+        Button(320, button_y, 60, 50, WHITE, "Clear", BLACK),
+
+        # Новые кнопки фигур
+        Button(400, button_y, 70, 50, WHITE, "Square", BLACK),
+        Button(480, button_y, 70, 50, WHITE, "R-Tri", BLACK),
+        Button(560, button_y, 70, 50, WHITE, "E-Tri", BLACK),
+        Button(640, button_y, 70, 50, WHITE, "Rhombus", BLACK),
+    ]
+
+    run = True
+    while run:
+        clock.tick(FPS)
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                running = False
+                run = False
 
-            if event.type == pygame.KEYDOWN:
-                # Switch between tools
-                if event.key == pygame.K_p:  # Pencil tool (draw lines)
-                    drawing_mode = 'pencil'
-                elif event.key == pygame.K_r:  # Rectangle tool
-                    drawing_mode = 'rectangle'
-                elif event.key == pygame.K_c:  # Circle tool
-                    drawing_mode = 'circle'
-                elif event.key == pygame.K_e:  # Eraser tool
-                    drawing_mode = 'eraser'
-                elif event.key == pygame.K_b:  # Blue color
-                    current_color = BLUE
-                elif event.key == pygame.K_g:  # Green color
-                    current_color = GREEN
-                elif event.key == pygame.K_r:  # Red color
-                    current_color = RED
+            if pygame.mouse.get_pressed()[0]:
+                pos = pygame.mouse.get_pos()
+                try:
+                    row, col = get_row_col_from_pos(pos)
+                    # Рисуем выбранную фигуру
+                    if current_shape == "square":
+                        draw_square(grid, row, col, drawing_color)
+                    elif current_shape == "right_triangle":
+                        draw_right_triangle(grid, row, col, drawing_color)
+                    elif current_shape == "equilateral_triangle":
+                        draw_equilateral_triangle(grid, row, col, drawing_color)
+                    elif current_shape == "rhombus":
+                        draw_rhombus(grid, row, col, drawing_color)
+                    else:
+                        grid[row][col] = drawing_color
+                except IndexError:
+                    for button in buttons:
+                        if not button.clicked(pos):
+                            continue
 
-            if event.type == pygame.MOUSEBUTTONDOWN:
-                if event.button == 1:  # Left click to start drawing
-                    if drawing_mode == 'pencil':
-                        points.append(event.pos)
-                    elif drawing_mode == 'rectangle':
-                        rect_start = event.pos
-                    elif drawing_mode == 'circle':
-                        rect_start = event.pos
-                    elif drawing_mode == 'eraser':
-                        erase(event.pos)
+                        if button.text == "Clear":
+                            grid = init_grid(ROWS, COLS, BG_COLOR)
+                            drawing_color = BLACK
+                            current_shape = None
+                        elif button.text == "Erase":
+                            drawing_color = WHITE
+                            current_shape = None
+                        elif button.text == "Square":
+                            current_shape = "square"
+                        elif button.text == "R-Tri":
+                            current_shape = "right_triangle"
+                        elif button.text == "E-Tri":
+                            current_shape = "equilateral_triangle"
+                        elif button.text == "Rhombus":
+                            current_shape = "rhombus"
+                        else:
+                            drawing_color = button.color
+                            current_shape = None
 
-            if event.type == pygame.MOUSEMOTION:
-                if drawing_mode == 'pencil' and pygame.mouse.get_pressed()[0]:
-                    points.append(event.pos)
+        draw(win, grid, buttons)
 
-                if drawing_mode == 'rectangle' and rect_start:
-                    # Draw rectangle as mouse moves
-                    drawRectangle(rect_start, event.pos)
-                elif drawing_mode == 'circle' and rect_start:
-                    # Draw circle as mouse moves
-                    drawCircle(rect_start, event.pos)
+    pygame.quit()
 
-            if event.type == pygame.MOUSEBUTTONUP:
-                if drawing_mode == 'rectangle' and rect_start:
-                    # Draw the final rectangle on mouse release
-                    drawRectangle(rect_start, event.pos)
-                    rect_start = None
-                elif drawing_mode == 'circle' and rect_start:
-                    # Draw the final circle on mouse release
-                    drawCircle(rect_start, event.pos)
-                    rect_start = None
-
-        # Draw pencil points
-        if drawing_mode == 'pencil':
-            for i in range(1, len(points)):
-                pygame.draw.line(screen, current_color, points[i-1], points[i], radius)
-
-        pygame.display.flip()
-        clock.tick(60)
-
-def drawRectangle(start, end):
-    width = abs(end[0] - start[0])
-    height = abs(end[1] - start[1])
-    rect = pygame.Rect(start, (width, height))
-    pygame.draw.rect(screen, current_color, rect, 3)
-
-def drawCircle(start, end):
-    radius = int(((end[0] - start[0])**2 + (end[1] - start[1])**2)**0.5)
-    pygame.draw.circle(screen, current_color, start, radius, 3)
-
-def erase(pos):
-    eraser_size = 20  # Size of the eraser
-    pygame.draw.circle(screen, WHITE, pos, eraser_size)
 
 if __name__ == "__main__":
     main()
-    pygame.quit()
